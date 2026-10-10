@@ -1,0 +1,69 @@
+Pinscope Device Component License, version 1.0
+
+Copyright (c) 2026 FluxCore Labs. All rights reserved.
+
+This license covers the Pinscope device component ("the Software"): the source
+code distributed with this file, which is built into firmware to connect a
+device to the Pinscope service operated by FluxCore Labs ("the Service").
+
+1. What you may do
+
+   Subject to the conditions below, FluxCore Labs grants you a worldwide,
+   royalty-free, non-exclusive permission to:
+
+   a. use, copy and modify the Software;
+   b. build the Software, modified or not, into firmware, and distribute and
+      sell that firmware in binary form as part of your products;
+   c. distribute the Software in source form, modified or not, provided that
+      this license accompanies every copy.
+
+2. The condition: use with the Service only
+
+   The Software, and any work derived from it, may be used only to connect
+   devices to the Service. You may not use the Software or any part of it:
+
+   a. to connect devices to any server or service other than the Service;
+   b. to build, operate or offer a service that implements the protocol the
+      Software speaks, or that otherwise substitutes for the Service;
+   c. after removing or altering the address of the Service in order to do
+      either of the above.
+
+   Running the Software against a server on your own computer solely to test
+   your own firmware before it is released is not a breach of this section.
+
+3. Notices and names
+
+   Keep the copyright notice and this license in every copy of the source
+   code. Firmware distributed in binary form does not need to display them.
+   This license gives no right to use the names "Pinscope" or "FluxCore Labs",
+   or their marks, except to state truthfully that a product connects to the
+   Service.
+
+4. Contributions
+
+   If you send FluxCore Labs a change to the Software, you agree that FluxCore
+   Labs may use, modify and distribute it under any terms, without obligation
+   to you.
+
+5. No warranty
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+
+6. Limitation of liability
+
+   TO THE EXTENT THE LAW ALLOWS, IN NO EVENT SHALL FLUXCORE LABS BE LIABLE FOR
+   ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+   TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
+   OR ITS USE, INCLUDING ANY DEVICE THAT FAILS OR IS DAMAGED.
+
+7. Termination
+
+   Your rights under this license end automatically if you break its
+   conditions. They are restored if you stop the breach within 30 days of
+   learning of it. Sections 5 and 6 continue to apply after termination.
+
+8. Law
+
+   This license is governed by the law of the Republic of Serbia.

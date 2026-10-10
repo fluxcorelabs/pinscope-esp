@@ -1,0 +1,6 @@
+version: "0.1.0"
+description: Remote HTTP/WebSocket access, logs and metrics for ESP32 over one outbound connection
+dependencies:
+  idf: ">=5.0"
+license: "LicenseRef-Pinscope-Device-1.0"
+url: "https://pinscope.fluxcorelabs.io"

@@ -1,0 +1,178 @@
+menu "Pinscope"
+
+    config PINSCOPE_KCONFIG
+        bool
+        default y
+
+    config PINSCOPE_PROJECT_KEY
+        string "Project key"
+        default ""
+        help
+            Copied from the dashboard. The same key goes into every device of
+            a project; each device registers itself on first connect.
+
+    config PINSCOPE_DEVICE_NAME
+        string "Device name"
+        default ""
+        help
+            Optional label shown in the dashboard.
+
+    config PINSCOPE_LOCAL_PORT
+        int "Local port to expose"
+        range 1 65535
+        default 80
+        help
+            TCP port of the server on this device that is reachable through
+            the device URL. More ports can be listed in pinscope_config_t.
+
+    config PINSCOPE_OTA
+        bool "Firmware updates from the server"
+        default y
+        help
+            Lets the project owner push a new application image from the
+            dashboard. It is written to the spare OTA partition with esp_ota
+            and booted after verification, so the partition table needs two
+            OTA app slots. With CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE the new
+            image is confirmed once it reaches the server; if it never does,
+            the bootloader returns to the previous one.
+
+    menu "Reported data"
+
+        config PINSCOPE_DEVICE_INFO
+            bool "Device info on connect"
+            default y
+            help
+                Chip, firmware version, ELF hash, ESP-IDF version and the
+                reason of the last reset. The server counts restarts from it
+                and crash reports are matched to a build with it.
+
+        config PINSCOPE_LOG_CAPTURE
+            bool "ESP_LOG output"
+            default y
+
+        config PINSCOPE_CRASH_CAPTURE
+            bool "Crash reports with a backtrace"
+            default y
+            help
+                Wraps the panic handler to keep the crash reason and call
+                chain in RTC memory across the reboot, and sends them on the
+                next connection. Disable if the application wraps
+                esp_panic_handler itself.
+
+        menuconfig PINSCOPE_SYSTEM_METRICS
+            bool "Built-in metrics"
+            default y
+
+        if PINSCOPE_SYSTEM_METRICS
+
+            config PINSCOPE_METRICS_INTERVAL
+                int "Interval (seconds)"
+                range 5 3600
+                default 60
+
+            config PINSCOPE_METRIC_HEAP
+                bool "Heap: free, minimum ever, largest free block"
+                default y
+
+            config PINSCOPE_METRIC_UPTIME
+                bool "Uptime"
+                default y
+
+            config PINSCOPE_METRIC_RSSI
+                bool "WiFi signal strength"
+                default y
+
+            config PINSCOPE_METRIC_WIFI_DISCONNECTS
+                bool "WiFi disconnect count and last reason code"
+                default y
+
+            config PINSCOPE_METRIC_TASK_STACK
+                bool "Least free stack of any task"
+                default y
+                help
+                    All tasks are checked on single-core chips. On dual-core
+                    chips this needs CONFIG_FREERTOS_USE_TRACE_FACILITY;
+                    without it only the Pinscope task is checked.
+
+            config PINSCOPE_METRIC_TASK_STACK_EACH
+                bool "Free stack of every task"
+                default y
+                help
+                    One metric per task, named stack/<task>, shown as a table
+                    in the dashboard. Same limits on dual-core chips as above.
+
+            config PINSCOPE_METRIC_TASK_CPU
+                bool "CPU usage of every task"
+                default y
+                select FREERTOS_USE_TRACE_FACILITY
+                select FREERTOS_GENERATE_RUN_TIME_STATS
+                help
+                    Share of CPU time each task used since the previous
+                    report (cpu/<task>) and the overall load (cpu_load).
+                    Turns on FreeRTOS run-time statistics, which read a timer
+                    on every context switch. As a side effect the task list
+                    is also complete on dual-core chips.
+
+            config PINSCOPE_STACK_WARNING
+                int "Log a warning below this many free stack bytes (0 = never)"
+                depends on PINSCOPE_METRIC_TASK_STACK || PINSCOPE_METRIC_TASK_STACK_EACH
+                range 0 4096
+                default 256
+
+            config PINSCOPE_METRIC_TEMPERATURE
+                bool "Chip temperature"
+                depends on SOC_TEMP_SENSOR_SUPPORTED
+                default y
+                help
+                    Uses the internal temperature sensor. Skipped at run time
+                    if the application already owns the sensor.
+
+        endif
+
+    endmenu
+
+    config PINSCOPE_MAX_STREAMS
+        int "Concurrent tunnelled connections"
+        range 1 16
+        default 2
+        help
+            Each one needs two sockets while open (one for the tunnel side,
+            one accepted by the local server). The default fits the stock
+            CONFIG_LWIP_MAX_SOCKETS=10; raise both together.
+
+    config PINSCOPE_MAX_FRAME
+        int "Frame payload size"
+        range 512 4096
+        default 1024
+        help
+            Two buffers of this size are allocated.
+
+    config PINSCOPE_OUTBOX_SIZE
+        int "Outbox size"
+        range 0 16384
+        default 3072
+        help
+            RAM for logs and metrics waiting to be sent. The oldest entries
+            are dropped when it is full. 0 disables logs and metrics.
+
+    config PINSCOPE_TASK_STACK
+        int "Task stack size"
+        range 4096 16384
+        default 8192
+        help
+            The TLS handshake runs on this stack.
+
+    config PINSCOPE_TASK_PRIORITY
+        int "Task priority"
+        range 1 24
+        default 5
+
+    config PINSCOPE_POLL_MS
+        int "Poll interval (ms)"
+        range 20 999
+        default 250
+        help
+            Upper bound on how long queued logs and metrics wait when the
+            tunnel is otherwise idle.
+
+endmenu

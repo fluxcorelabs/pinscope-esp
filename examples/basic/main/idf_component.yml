@@ -1,0 +1,3 @@
+dependencies:
+  pinscope:
+    git: https://github.com/fluxcorelabs/pinscope-esp.git
