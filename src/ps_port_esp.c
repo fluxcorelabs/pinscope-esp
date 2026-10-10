@@ -367,11 +367,16 @@ int ps_port_ota_end(void)
 
 void ps_port_ota_abort(void) { esp_ota_abort(s_ota); }
 
-void ps_port_ota_confirm(void)
+bool ps_port_ota_on_trial(void)
 {
     esp_ota_img_states_t state;
-    if (esp_ota_get_state_partition(esp_ota_get_running_partition(), &state) == ESP_OK &&
-        state == ESP_OTA_IMG_PENDING_VERIFY) {
+    return esp_ota_get_state_partition(esp_ota_get_running_partition(), &state) == ESP_OK &&
+           state == ESP_OTA_IMG_PENDING_VERIFY;
+}
+
+void ps_port_ota_confirm(void)
+{
+    if (ps_port_ota_on_trial()) {
         esp_ota_mark_app_valid_cancel_rollback();
         ESP_LOGI(TAG, "new firmware confirmed, rollback cancelled");
     }
@@ -385,6 +390,7 @@ int  ps_port_ota_write(const void *data, size_t len) { return -1; }
 int  ps_port_ota_end(void) { return -1; }
 void ps_port_ota_abort(void) {}
 void ps_port_ota_confirm(void) {}
+bool ps_port_ota_on_trial(void) { return false; }
 
 #endif
 

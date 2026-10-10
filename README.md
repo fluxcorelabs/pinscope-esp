@@ -103,7 +103,9 @@ It goes through the standard `esp_ota` path: written to the spare slot,
 verified, set as the boot partition, restart. Enable
 `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` to have the bootloader return to the
 previous image when the new one never manages to reach the server; Pinscope
-confirms the image on its first successful connection. While an image is being
+confirms the image on its first successful connection, and restarts the
+device if that has not happened within five minutes
+(`PINSCOPE_OTA_TRIAL_S`), so a bad update undoes itself. While an image is being
 written the tunnel is busy, so requests to the device wait.
 
 ## Resources

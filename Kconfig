@@ -36,6 +36,18 @@ menu "Pinscope"
             image is confirmed once it reaches the server; if it never does,
             the bootloader returns to the previous one.
 
+    config PINSCOPE_OTA_TRIAL_S
+        int "Seconds a new firmware has to reach the server"
+        depends on PINSCOPE_OTA
+        range 0 3600
+        default 300
+        help
+            With CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE, an updated image runs
+            on trial until it connects. If it has not connected after this
+            long, the device restarts and the bootloader returns to the
+            previous image. 0 waits forever (the rollback then happens only at
+            the next reset).
+
     menu "Reported data"
 
         config PINSCOPE_DEVICE_INFO

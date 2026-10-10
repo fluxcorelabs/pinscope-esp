@@ -88,6 +88,9 @@ int  ps_port_ota_end(void);
 void ps_port_ota_abort(void);
 /* Tell the bootloader the running image works, cancelling a pending rollback. */
 void ps_port_ota_confirm(void);
+/* True while a freshly updated image runs on trial: the bootloader returns to
+ * the previous one at the next reset unless it is confirmed first. */
+bool ps_port_ota_on_trial(void);
 void ps_port_restart(void);
 
 /* PINSCOPE_M_* bits selected at build time. */

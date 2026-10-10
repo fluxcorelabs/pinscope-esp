@@ -48,6 +48,9 @@
 #ifndef CONFIG_PINSCOPE_METRICS_INTERVAL
 #define CONFIG_PINSCOPE_METRICS_INTERVAL 60
 #endif
+#ifndef CONFIG_PINSCOPE_OTA_TRIAL_S
+#define CONFIG_PINSCOPE_OTA_TRIAL_S 300
+#endif
 #ifndef CONFIG_PINSCOPE_POLL_MS
 #define CONFIG_PINSCOPE_POLL_MS 250
 #endif
@@ -846,6 +849,20 @@ static void session_cleanup(void)
     g.pend_s = NULL;
 }
 
+/* A new image that cannot reach the server would otherwise keep running, out
+ * of reach, until something else reset the device. Give it a fixed time, then
+ * restart so the bootloader goes back to the image that worked. */
+static void give_up_on_trial_image(void)
+{
+    if (CONFIG_PINSCOPE_OTA_TRIAL_S > 0 && ps_port_ota_on_trial() &&
+        ps_port_millis() > (uint32_t)CONFIG_PINSCOPE_OTA_TRIAL_S * 1000UL) {
+        ps_port_logf(PS_LOG_ERROR, "the updated firmware did not reach the server in %d s, "
+                     "restarting into the previous one", CONFIG_PINSCOPE_OTA_TRIAL_S);
+        ps_port_sleep(200);
+        ps_port_restart();
+    }
+}
+
 static void task_main(void *arg)
 {
     uint32_t backoff = BACKOFF_MIN_MS;
@@ -894,6 +911,9 @@ static void task_main(void *arg)
         g.kick = false;
         for (uint32_t t = 0; t < wait && !g.stop && !g.kick; t += 100) {
             ps_port_sleep(100);
+            if (t % 1000 == 0) {
+                give_up_on_trial_image();
+            }
         }
     }
     set_state(PINSCOPE_STOPPED);
