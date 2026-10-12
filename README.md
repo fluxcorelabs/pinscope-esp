@@ -2,9 +2,11 @@
 
 The device side of [Pinscope](https://pinscope.fluxcorelabs.io): it gives the
 web server on an ESP32 a secure public URL and sends logs, metrics and crash
-reports, and receives firmware updates, over one outbound connection.
+reports, and receives firmware updates, over one outbound connection that
+needs under 10 KB of RAM.
 
-For ESP-IDF 5.x and 6.x. You need a Pinscope account for the project key.
+For ESP-IDF 5.x and 6.x, on every ESP32 with WiFi (ESP32, S2, S3, C2, C3, C5,
+C6, C61). You need a Pinscope account for the project key.
 
 ## Add it to a project
 
@@ -73,7 +75,7 @@ Everything is under **Pinscope → Reported data** in menuconfig.
 | `wifi_disconnects`, `wifi_last_reason` | `PINSCOPE_METRIC_WIFI_DISCONNECTS` | on |
 | `stack_min`, plus a log warning when a task runs low | `PINSCOPE_METRIC_TASK_STACK` | on |
 | `stack/<task>` for every task | `PINSCOPE_METRIC_TASK_STACK_EACH` | on |
-| `cpu/<task>` for every task, and `cpu_load` | `PINSCOPE_METRIC_TASK_CPU` | on |
+| `cpu/<task>` for every task, and `cpu_load` | `PINSCOPE_METRIC_TASK_CPU` | off |
 | `chip_temp_c` | `PINSCOPE_METRIC_TEMPERATURE` | on, where the chip has a sensor |
 
 `PINSCOPE_METRICS_INTERVAL` sets how often the built-in metrics are sent
@@ -82,11 +84,11 @@ Everything is under **Pinscope → Reported data** in menuconfig.
 
 Notes:
 
-- CPU usage turns on FreeRTOS run-time statistics
+- CPU usage is off by default: it turns on FreeRTOS run-time statistics
   (`CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS` and
-  `CONFIG_FREERTOS_USE_TRACE_FACILITY`), which costs a timer read on every
-  context switch. Switch `PINSCOPE_METRIC_TASK_CPU` off if you do not want
-  that.
+  `CONFIG_FREERTOS_USE_TRACE_FACILITY`) for the whole firmware, which costs a
+  timer read on every context switch and some RAM per task. Switch
+  `PINSCOPE_METRIC_TASK_CPU` on if you want it.
 - With CPU usage off, stack data covers every task only on single-core chips;
   on dual-core chips it then needs `CONFIG_FREERTOS_USE_TRACE_FACILITY`,
   otherwise only the Pinscope task is measured.
@@ -110,10 +112,19 @@ written the tunnel is busy, so requests to the device wait.
 
 ## Resources
 
-- RAM: two frame buffers (1 KiB each), the outbox (3 KiB), an 8 KiB task stack,
-  plus the TLS session. All sizes are in menuconfig.
-- Sockets: one for the tunnel and two per open stream. The default of 2
-  streams fits the stock `CONFIG_LWIP_MAX_SOCKETS=10`.
+- RAM: 9.2 KB in total while connected (measured on an ESP32-S2): 4.8 KB
+  static (frame buffers of 1 KiB out and 512 B in, a 2 KiB outbox for logs
+  and metrics, the rest of the state) and a 3 KiB task stack. The sizes are
+  fixed; there is nothing to tune.
+- Flash: 16.8 KB for the component.
+- No TLS library and no DNS cache: the connection is a Noise handshake
+  (X25519) and ChaCha20-Poly1305 implemented in the component, and the
+  service's name is looked up with one query per connection.
+- Network: one outbound TCP connection to the service on port 443, so it
+  passes networks that only let HTTPS out. Only firewalls that inspect
+  traffic and allow nothing but TLS on that port block it.
+- Sockets: one for the tunnel and two per open stream. The 2 streams fit the
+  stock `CONFIG_LWIP_MAX_SOCKETS=10`.
 - If your HTTP server answers slowly through the tunnel, set `TCP_NODELAY` on
   its connections (see `examples/esp-idf-basic`): `esp_http_server` sends
   headers and body separately, which otherwise costs about 250 ms per request.

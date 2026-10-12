@@ -1,11 +1,5 @@
 CONFIG_HTTPD_WS_SUPPORT=y
 
-# Less RAM for the TLS connection: buffers are allocated per record and
-# released when the connection is idle, instead of two fixed 16 KiB buffers.
-CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
-CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=y
-CONFIG_MBEDTLS_DYNAMIC_FREE_CA_CERT=y
-
 # Two OTA slots so the firmware can be updated from the Pinscope dashboard.
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y

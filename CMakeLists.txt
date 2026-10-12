@@ -6,9 +6,9 @@ else()
 endif()
 
 idf_component_register(
-    SRCS "src/ps_core.c" "src/ps_port_esp.c"
+    SRCS "src/ps_core.c" "src/ps_crypto.c" "src/ps_port_esp.c"
     INCLUDE_DIRS "src"
-    PRIV_REQUIRES esp-tls mbedtls nvs_flash esp_event esp_netif esp_wifi esp_timer
+    PRIV_REQUIRES nvs_flash esp_event esp_netif esp_wifi esp_timer
                   esp_app_format app_update lwip ${tsens_component}
 )
 

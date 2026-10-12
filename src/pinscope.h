@@ -3,7 +3,7 @@
 /*
  * Pinscope - remote access and telemetry for embedded devices.
  *
- * One outbound WebSocket (TLS) connection carries:
+ * One outbound connection, encrypted with the Noise protocol, carries:
  *   - TCP streams from the cloud to servers listening on this device
  *     (HTTP, WebSocket, anything TCP on localhost)
  *   - metrics and log lines from the device to the cloud
@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#define PINSCOPE_VERSION   "0.1.1"
+#define PINSCOPE_VERSION   "0.2.0"
 #define PINSCOPE_MAX_PORTS 4
 
 typedef enum {
@@ -48,21 +48,16 @@ typedef enum {
 typedef struct {
     const char *project_key; /* from the dashboard, same for every device in a project */
     const char *device_name; /* label shown in the dashboard */
-    const char *ca_cert_pem; /* custom root CA; default is the platform CA bundle */
 
     /* Local TCP ports the cloud may open. ports[0] is served on the device URL,
      * the others on <port>-<device>.<domain>. Default: { 80 }. */
     uint16_t ports[PINSCOPE_MAX_PORTS];
 
-    uint8_t  max_streams;    /* concurrent tunnelled connections, default 2 */
-    uint16_t max_frame;      /* payload bytes per frame, 512..4096, default 1024 */
-    uint16_t outbox_size;    /* RAM for queued logs + metrics, default 3072 */
     pinscope_opt_t log_capture;    /* forward the platform log output */
     pinscope_opt_t system_metrics; /* master switch for the built-in metrics */
     uint16_t metrics;            /* PINSCOPE_M_* bits to send, 0 = build-time selection */
     uint16_t metrics_interval_s; /* default 60 */
 
-    uint16_t task_stack;     /* bytes, default 8192 */
     uint8_t  task_priority;  /* default 5 */
 } pinscope_config_t;
 

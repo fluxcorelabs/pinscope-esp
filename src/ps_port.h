@@ -2,7 +2,8 @@
  * Copyright (c) 2026 FluxCore Labs. See LICENSE: for use with the Pinscope service only. */
 /*
  * Platform layer. The core (ps_core.c) only needs what is declared here plus
- * BSD sockets for the loopback side of each stream.
+ * BSD sockets, for the connection to the service and the loopback side of
+ * each stream.
  */
 #pragma once
 
@@ -25,6 +26,7 @@ static inline int ps_set_nonblock(int fd)
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <netdb.h>
 #include <netinet/tcp.h>
 #include <sys/select.h>
 #include <sys/socket.h>
@@ -36,6 +38,12 @@ static inline int ps_set_nonblock(int fd)
 {
     return fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
 }
+#endif
+
+#if defined(__GNUC__)
+#define PS_NOINLINE __attribute__((noinline))
+#else
+#define PS_NOINLINE
 #endif
 
 #ifdef MSG_NOSIGNAL
@@ -53,7 +61,10 @@ enum { PS_LOG_ERROR, PS_LOG_WARN, PS_LOG_INFO };
 /* For the simulator and tests only: a server on the same machine. */
 extern const char *ps_test_server_url;
 
-typedef struct ps_conn ps_conn_t; /* connection to the cloud, TLS or plain */
+/* Stack of the Pinscope task, in bytes. */
+#ifndef PS_TASK_STACK
+#define PS_TASK_STACK 3072
+#endif
 
 int      ps_port_init(void);
 uint32_t ps_port_millis(void);
@@ -61,6 +72,8 @@ void     ps_port_sleep(uint32_t ms);
 void     ps_port_random(void *buf, size_t len);
 void     ps_port_lock(void);
 void     ps_port_unlock(void);
+/* From the core: queue log text while already holding ps_port_lock(). */
+void     ps_log_locked(const char *text, size_t len);
 int      ps_port_task_start(void (*fn)(void *), uint32_t stack, uint8_t priority);
 void     ps_port_logf(int level, const char *fmt, ...);
 
@@ -98,17 +111,13 @@ uint16_t ps_port_default_metrics(void);
 /* Report the selected PINSCOPE_M_* groups through pinscope_metric(). */
 void ps_port_sys_metrics(uint16_t mask);
 
-/* Blocking connect (with a timeout); the connection is non-blocking after. */
-int  ps_port_connect(ps_conn_t **out, const char *host, uint16_t port, bool tls,
-                     const char *ca_pem);
-int  ps_port_fd(ps_conn_t *c);
-/* Decrypted bytes already buffered, i.e. readable without the fd being ready. */
-int  ps_port_pending(ps_conn_t *c);
-/* >0 bytes read, 0 nothing available right now, <0 closed or failed. */
-int  ps_port_read(ps_conn_t *c, void *buf, size_t len);
-/* Writes everything or fails. 0 on success. */
-int  ps_port_write(ps_conn_t *c, const void *buf, size_t len);
-void ps_port_close(ps_conn_t *c);
+/* False while the device has no network address, so that connecting is not
+ * even tried. */
+bool ps_port_network_ready(void);
+/* IPv4 address of `host` (a name or dotted quad), network byte order.
+ * `scratch` (at least 512 bytes) is free for the port to use meanwhile.
+ * 0 on success. */
+int ps_port_resolve(const char *host, uint8_t *scratch, size_t len, uint32_t *addr);
 
 #ifdef __cplusplus
 }

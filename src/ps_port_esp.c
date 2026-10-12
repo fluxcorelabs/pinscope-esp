@@ -27,15 +27,12 @@
 #include "esp_random.h"
 #include "esp_system.h"
 #include "esp_timer.h"
-#include "esp_tls.h"
 #include "esp_wifi.h"
-#include "mbedtls/ssl.h"
+#include "lwip/inet.h"
+#include "lwip/sockets.h"
 #include "nvs.h"
 #include "sdkconfig.h"
 
-#if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
-#include "esp_crt_bundle.h"
-#endif
 #include "esp_idf_version.h"
 #include "soc/soc_caps.h"
 /* The task iterator moved between ESP-IDF 5 and 6. */
@@ -60,18 +57,11 @@
 #include "pinscope.h"
 #include "ps_port.h"
 
-#define IO_TIMEOUT_MS 10000
 #define NVS_NAMESPACE "pinscope"
 
 static const char *TAG = "pinscope";
 
-struct ps_conn {
-    esp_tls_t *tls;
-    int        fd;
-    bool       plain;
-};
-
-static SemaphoreHandle_t s_lock, s_log_lock;
+static SemaphoreHandle_t s_lock; /* the outbox, and s_log_line with it */
 static vprintf_like_t    s_prev_vprintf;
 static bool              s_capturing;
 static char              s_log_line[192];
@@ -97,8 +87,7 @@ int ps_port_init(void)
         return 0;
     }
     s_lock = xSemaphoreCreateMutex();
-    s_log_lock = xSemaphoreCreateMutex();
-    if (!s_lock || !s_log_lock) {
+    if (!s_lock) {
         return -1;
     }
     /* Fails harmlessly when the app has no default event loop yet. */
@@ -214,15 +203,15 @@ int ps_port_kv_set(const char *key, const char *value)
 static int log_vprintf(const char *fmt, va_list ap)
 {
     if (s_capturing && !xPortInIsrContext() &&
-        xSemaphoreTake(s_log_lock, pdMS_TO_TICKS(20)) == pdTRUE) {
+        xSemaphoreTake(s_lock, pdMS_TO_TICKS(20)) == pdTRUE) {
         va_list copy;
         va_copy(copy, ap);
         int n = vsnprintf(s_log_line, sizeof(s_log_line), fmt, copy);
         va_end(copy);
         if (n > 0) {
-            pinscope_log(s_log_line, n < (int)sizeof(s_log_line) ? (size_t)n : sizeof(s_log_line) - 1);
+            ps_log_locked(s_log_line, n < (int)sizeof(s_log_line) ? (size_t)n : sizeof(s_log_line) - 1);
         }
-        xSemaphoreGive(s_log_lock);
+        xSemaphoreGive(s_lock);
     }
     return s_prev_vprintf ? s_prev_vprintf(fmt, ap) : vprintf(fmt, ap);
 }
@@ -435,7 +424,7 @@ uint16_t ps_port_default_metrics(void)
 /* Per task: free stack ("stack/<task>") and, when FreeRTOS keeps run-time
  * statistics, the share of CPU time since the previous report ("cpu/<task>").
  * Overall: "stack_min" and "cpu_load". */
-#define TASKS_MAX 24
+#define TASKS_MAX 16
 
 typedef struct {
     char     name[configMAX_TASK_NAME_LEN];
@@ -607,104 +596,143 @@ void ps_port_sys_metrics(uint16_t mask)
 
 /* Trying to connect before the network has an address only fills the log
  * with errors; the got-IP event cuts the wait short once it does. */
-static bool network_ready(void)
+bool ps_port_network_ready(void)
 {
     esp_netif_ip_info_t ip;
     esp_netif_t *netif = esp_netif_get_default_netif();
     return netif && esp_netif_get_ip_info(netif, &ip) == ESP_OK && ip.ip.addr != 0;
 }
 
-int ps_port_connect(ps_conn_t **out, const char *host, uint16_t port, bool tls, const char *ca_pem)
-{
-    if (!network_ready()) {
-        return -1;
-    }
-    esp_tls_cfg_t cfg = { .timeout_ms = IO_TIMEOUT_MS, .is_plain_tcp = !tls };
-    if (tls && ca_pem) {
-        cfg.cacert_pem_buf = (const unsigned char *)ca_pem;
-        cfg.cacert_pem_bytes = strlen(ca_pem) + 1;
-    } else if (tls) {
-#if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
-        cfg.crt_bundle_attach = esp_crt_bundle_attach;
-#else
-        ESP_LOGE(TAG, "enable CONFIG_MBEDTLS_CERTIFICATE_BUNDLE or set ca_cert_pem");
-        return -1;
-#endif
-    }
+/* ---- name lookup ----
+ * One A query to the DNS server the network gave us. lwIP's own resolver
+ * (behind getaddrinfo) keeps a 1.2 KB cache in RAM for the life of the
+ * program; the service is looked up once per connection, so this keeps none. */
 
-    ps_conn_t *c = calloc(1, sizeof(*c));
-    esp_tls_t *t = esp_tls_init();
-    if (!c || !t || esp_tls_conn_new_sync(host, (int)strlen(host), port, &cfg, t) != 1 ||
-        esp_tls_get_conn_sockfd(t, &c->fd) != ESP_OK) {
-        if (t) {
-            esp_tls_conn_destroy(t);
-        }
-        free(c);
-        return -1;
+#define DNS_PORT  53
+#define DNS_TRIES 3
+#define DNS_WAIT_MS 2000
+
+static size_t dns_query(uint8_t *q, size_t cap, const char *host, uint16_t id)
+{
+    size_t n = 12;
+    if (strlen(host) > 253 || cap < 12 + strlen(host) + 2 + 4) {
+        return 0;
     }
-    c->tls = t;
-    c->plain = !tls;
-    ps_set_nonblock(c->fd);
-    *out = c;
+    memset(q, 0, 12);
+    q[0] = (uint8_t)(id >> 8);
+    q[1] = (uint8_t)id;
+    q[2] = 0x01; /* recursion desired */
+    q[5] = 1;    /* one question */
+    while (*host) {
+        size_t l = strcspn(host, ".");
+        if (l == 0 || l > 63) {
+            return 0;
+        }
+        q[n++] = (uint8_t)l;
+        memcpy(q + n, host, l);
+        n += l;
+        host += l + (host[l] == '.');
+    }
+    q[n++] = 0;
+    q[n++] = 0; q[n++] = 1; /* type A */
+    q[n++] = 0; q[n++] = 1; /* class IN */
+    return n;
+}
+
+/* Offset just past the name at `at`, 0 when it runs off the message. */
+static size_t dns_skip_name(const uint8_t *m, size_t len, size_t at)
+{
+    while (at < len) {
+        uint8_t l = m[at];
+        if ((l & 0xc0) == 0xc0) {
+            return at + 2 <= len ? at + 2 : 0; /* compressed: a pointer ends it */
+        }
+        if (l & 0xc0) {
+            return 0; /* reserved label type */
+        }
+        at += 1 + l;
+        if (l == 0) {
+            return at;
+        }
+    }
     return 0;
 }
 
-int ps_port_fd(ps_conn_t *c) { return c->fd; }
-
-int ps_port_pending(ps_conn_t *c)
+static int dns_answer(const uint8_t *m, size_t len, uint16_t id, uint32_t *addr)
 {
-    return c->plain ? 0 : (int)esp_tls_get_bytes_avail(c->tls);
-}
-
-static bool would_block(ps_conn_t *c, int ret)
-{
-    if (c->plain) {
-        return ps_sock_wouldblock();
+    if (len < 12 || ((m[0] << 8) | m[1]) != id || !(m[2] & 0x80) || (m[3] & 0x0f) != 0) {
+        return -1;
     }
-    return ret == ESP_TLS_ERR_SSL_WANT_READ || ret == ESP_TLS_ERR_SSL_WANT_WRITE ||
-           ret == ESP_TLS_ERR_SSL_TIMEOUT
-#ifdef MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET
-           || ret == MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET
-#endif
-        ;
-}
-
-int ps_port_read(ps_conn_t *c, void *buf, size_t len)
-{
-    int n = (int)esp_tls_conn_read(c->tls, buf, len);
-    if (n > 0) {
-        return n;
-    }
-    return (n < 0 && would_block(c, n)) ? 0 : -1;
-}
-
-int ps_port_write(ps_conn_t *c, const void *buf, size_t len)
-{
-    const uint8_t *p = buf;
-    uint32_t start = ps_port_millis();
-    while (len) {
-        int n = (int)esp_tls_conn_write(c->tls, p, len);
-        if (n > 0) {
-            p += n;
-            len -= (size_t)n;
-            continue;
-        }
-        if (n == 0 || !would_block(c, n) || (uint32_t)(ps_port_millis() - start) > IO_TIMEOUT_MS) {
+    unsigned qd = (m[4] << 8) | m[5], an = (m[6] << 8) | m[7];
+    size_t at = 12;
+    while (qd--) {
+        at = dns_skip_name(m, len, at);
+        if (!at || (at += 4) > len) {
             return -1;
         }
-        fd_set w;
-        struct timeval tv = { 0, 100 * 1000 };
-        FD_ZERO(&w);
-        FD_SET(c->fd, &w);
-        select(c->fd + 1, NULL, &w, NULL, &tv);
     }
-    return 0;
+    while (an--) {
+        at = dns_skip_name(m, len, at);
+        if (!at || at + 10 > len) {
+            return -1;
+        }
+        unsigned type = (m[at] << 8) | m[at + 1], cls = (m[at + 2] << 8) | m[at + 3];
+        unsigned rdlen = (m[at + 8] << 8) | m[at + 9];
+        at += 10;
+        if (at + rdlen > len) {
+            return -1;
+        }
+        if (type == 1 && cls == 1 && rdlen == 4) { /* A, IN; CNAMEs before it are skipped */
+            memcpy(addr, m + at, 4);
+            return 0;
+        }
+        at += rdlen;
+    }
+    return -1;
 }
 
-void ps_port_close(ps_conn_t *c)
+int ps_port_resolve(const char *host, uint8_t *scratch, size_t len, uint32_t *addr)
 {
-    esp_tls_conn_destroy(c->tls);
-    free(c);
+    struct in_addr literal;
+    if (inet_aton(host, &literal)) {
+        *addr = literal.s_addr;
+        return 0;
+    }
+    esp_netif_dns_info_t dns;
+    esp_netif_t *netif = esp_netif_get_default_netif();
+    if (!netif || esp_netif_get_dns_info(netif, ESP_NETIF_DNS_MAIN, &dns) != ESP_OK ||
+        dns.ip.type != ESP_IPADDR_TYPE_V4 || dns.ip.u_addr.ip4.addr == 0) {
+        return -1;
+    }
+    struct sockaddr_in to = { .sin_family = AF_INET, .sin_port = htons(DNS_PORT) };
+    to.sin_addr.s_addr = dns.ip.u_addr.ip4.addr;
+
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) {
+        return -1;
+    }
+    int rc = -1;
+    for (int t = 0; t < DNS_TRIES && rc != 0; t++) {
+        uint16_t id;
+        esp_fill_random(&id, sizeof(id));
+        size_t n = dns_query(scratch, len, host, id);
+        if (!n || sendto(fd, scratch, n, 0, (struct sockaddr *)&to, sizeof(to)) != (int)n) {
+            break;
+        }
+        uint32_t start = ps_port_millis();
+        while (rc != 0 && (uint32_t)(ps_port_millis() - start) < DNS_WAIT_MS) {
+            fd_set r;
+            struct timeval tv = { 0, 200 * 1000 };
+            FD_ZERO(&r);
+            FD_SET(fd, &r);
+            if (select(fd + 1, &r, NULL, NULL, &tv) > 0) {
+                int got = recv(fd, scratch, len, 0);
+                rc = got > 0 ? dns_answer(scratch, (size_t)got, id, addr) : -1;
+            }
+        }
+    }
+    close(fd);
+    return rc;
 }
 
 #endif /* ESP_PLATFORM */

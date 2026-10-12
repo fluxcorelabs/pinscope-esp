@@ -115,7 +115,7 @@ menu "Pinscope"
 
             config PINSCOPE_METRIC_TASK_CPU
                 bool "CPU usage of every task"
-                default y
+                default n
                 select FREERTOS_USE_TRACE_FACILITY
                 select FREERTOS_GENERATE_RUN_TIME_STATS
                 help
@@ -142,37 +142,6 @@ menu "Pinscope"
         endif
 
     endmenu
-
-    config PINSCOPE_MAX_STREAMS
-        int "Concurrent tunnelled connections"
-        range 1 16
-        default 2
-        help
-            Each one needs two sockets while open (one for the tunnel side,
-            one accepted by the local server). The default fits the stock
-            CONFIG_LWIP_MAX_SOCKETS=10; raise both together.
-
-    config PINSCOPE_MAX_FRAME
-        int "Frame payload size"
-        range 512 4096
-        default 1024
-        help
-            Two buffers of this size are allocated.
-
-    config PINSCOPE_OUTBOX_SIZE
-        int "Outbox size"
-        range 0 16384
-        default 3072
-        help
-            RAM for logs and metrics waiting to be sent. The oldest entries
-            are dropped when it is full. 0 disables logs and metrics.
-
-    config PINSCOPE_TASK_STACK
-        int "Task stack size"
-        range 4096 16384
-        default 8192
-        help
-            The TLS handshake runs on this stack.
 
     config PINSCOPE_TASK_PRIORITY
         int "Task priority"
