@@ -22,7 +22,7 @@
  * the component is licensed for use with this service only (see LICENSE). */
 #ifndef PINSCOPE_SERVICE_URL
 #define PINSCOPE_SERVICE_URL \
-    "psl://pinscope.fluxcorelabs.io:443/71d9a78cbfd44a3f4debcf5f2c8df68c3b1f06276db365a292946df7b1e27421"
+    "psl://connect.pinscope.dev:443/71d9a78cbfd44a3f4debcf5f2c8df68c3b1f06276db365a292946df7b1e27421"
 #endif
 #ifndef CONFIG_PINSCOPE_PROJECT_KEY
 #define CONFIG_PINSCOPE_PROJECT_KEY ""

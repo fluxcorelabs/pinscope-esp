@@ -1,6 +1,6 @@
 # Pinscope for ESP32
 
-The device side of [Pinscope](https://pinscope.fluxcorelabs.io): it gives the
+The device side of [Pinscope](https://pinscope.dev): it gives the
 web server on an ESP32 a secure public URL and sends logs, metrics and crash
 reports, and receives firmware updates, over one outbound connection that
 needs under 10 KB of RAM.
