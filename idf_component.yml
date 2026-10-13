@@ -1,6 +1,15 @@
 version: "0.2.4"
-description: Remote HTTP/WebSocket access, logs and metrics for ESP32 over one outbound connection
+description: Remote access to the device's web server, logs, metrics, crash reports and OTA updates for ESP32, in under 10 KB of RAM
+url: "https://pinscope.dev"
+repository: "https://github.com/pinscope-dev/pinscope-esp.git"
+documentation: "https://pinscope.dev/docs"
+issues: "https://github.com/pinscope-dev/pinscope-esp/issues"
+license: "LicenseRef-Pinscope-Device-1.0"
+tags:
+  - remote-access
+  - tunnel
+  - ota
+  - logging
+  - monitoring
 dependencies:
   idf: ">=5.0"
-license: "LicenseRef-Pinscope-Device-1.0"
-url: "https://pinscope.dev"
