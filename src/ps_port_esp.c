@@ -29,7 +29,11 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "lwip/inet.h"
+#include "lwip/pbuf.h"
 #include "lwip/sockets.h"
+#include "lwip/tcp.h"
+#include "lwip/tcpip.h"
+#include "lwip/udp.h"
 #include "nvs.h"
 #include "sdkconfig.h"
 
@@ -95,12 +99,6 @@ int ps_port_init(void)
     esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, on_got_ip, NULL);
     esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, on_wifi_disconnect, NULL);
     s_boot_id = esp_random();
-#if defined(CONFIG_LWIP_TCP_RECVMBOX_SIZE) && CONFIG_LWIP_TCP_RECVMBOX_SIZE < 16
-    /* lwIP drops what does not fit; the local server then repeats it 1.5 s
-     * later, which shows as downloads that pause. */
-    ESP_LOGW(TAG, "CONFIG_LWIP_TCP_RECVMBOX_SIZE is %d in this project's sdkconfig: set it to 32, "
-             "or large downloads through the tunnel will pause", CONFIG_LWIP_TCP_RECVMBOX_SIZE);
-#endif
     return 0;
 }
 
@@ -625,6 +623,381 @@ void ps_port_sys_metrics(uint16_t mask)
         report_temperature();
     }
 #endif
+}
+
+/* ---- connections to local servers ----
+ *
+ * These use lwIP's callback API, not sockets. A socket keeps at most
+ * CONFIG_LWIP_TCP_RECVMBOX_SIZE received packets (6 unless the application
+ * raises it) and lwIP drops what does not fit; a web server that answers in
+ * small pieces overruns that long before the TCP window closes, and each time
+ * the transfer waits 1.5 s for a retransmission. Here every packet is taken
+ * as it arrives and lwIP is told how much has been read, so the window, in
+ * bytes, is the only limit, whatever the application's configuration.
+ *
+ * Everything that touches a connection runs in lwIP's own thread
+ * (tcpip_callback_wait); the callbacks run there too, so nothing needs a
+ * lock. News for the Pinscope task is a flag per connection; when the task
+ * is waiting in select(), a one-byte datagram to a loopback socket wakes it.
+ */
+
+#define LOCAL_MAX      4
+/* Six segments of this size fill a default lwIP window (5760 bytes), and six
+ * is what the server's socket may hold: data to it is sent in pieces at
+ * least this large, or when nothing more is coming. */
+#define LOCAL_FLUSH_AT 960
+
+enum { L_FREE = 0, L_CONNECTING, L_OPEN, L_FAILED };
+
+typedef struct {
+    struct tcp_pcb  *pcb; /* NULL once lwIP has dropped the connection */
+    struct pbuf     *rx;  /* received and not read yet */
+    volatile uint8_t state;
+    volatile bool    eof;
+    volatile bool    news;      /* something for the task to look at */
+    volatile uint16_t want;     /* received data is news once there is this much */
+    bool             want_sent; /* a write did not fit: tell the task when room appears */
+} local_t;
+
+enum { LC_OPEN, LC_READ, LC_WRITE, LC_FLUSH, LC_CLOSE };
+
+typedef struct {
+    int      op, h, ret;
+    uint16_t port;
+    void    *buf;
+    size_t   len;
+} local_call_t;
+
+static local_t         s_local[LOCAL_MAX];
+static struct udp_pcb *s_wake_tx;
+static int             s_wake_fd = -1;
+static uint16_t        s_wake_port;
+static volatile bool   s_wake_sent, s_unflushed;
+static volatile bool   s_sleeping; /* the task is in, or about to enter, select() */
+
+static void local_wake(local_t *l)
+{
+    struct pbuf *p;
+    ip_addr_t lo;
+    l->news = true;
+    /* A busy task finds the flag by itself (ps_local_ready). */
+    if (!s_sleeping || s_wake_sent || !s_wake_tx || !(p = pbuf_alloc(PBUF_TRANSPORT, 1, PBUF_RAM))) {
+        return;
+    }
+    IP_ADDR4(&lo, 127, 0, 0, 1);
+    *(uint8_t *)p->payload = 0;
+    if (udp_sendto(s_wake_tx, p, &lo, s_wake_port) == ERR_OK) {
+        s_wake_sent = true;
+    }
+    pbuf_free(p);
+}
+
+static err_t local_connected(void *arg, struct tcp_pcb *pcb, err_t err)
+{
+    local_t *l = arg;
+    if (l) {
+        l->state = L_OPEN;
+        local_wake(l);
+    }
+    return ERR_OK;
+}
+
+static err_t local_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
+{
+    local_t *l = arg;
+    if (!l) { /* closed on our side: discard */
+        if (p) {
+            tcp_recved(pcb, p->tot_len);
+            pbuf_free(p);
+        }
+        return ERR_OK;
+    }
+    if (!p) {
+        l->eof = true;
+    } else if (l->rx) {
+        pbuf_cat(l->rx, p);
+    } else {
+        l->rx = p;
+    }
+    if (!p || l->rx->tot_len >= l->want) {
+        local_wake(l);
+    }
+    return ERR_OK;
+}
+
+static void local_err(void *arg, err_t err)
+{
+    local_t *l = arg;
+    if (l) {
+        l->pcb = NULL; /* lwIP has freed it */
+        if (l->state == L_CONNECTING) {
+            l->state = L_FAILED;
+        }
+        l->eof = true;
+        local_wake(l);
+    }
+}
+
+static err_t local_sent(void *arg, struct tcp_pcb *pcb, u16_t len)
+{
+    local_t *l = arg;
+    if (l && l->want_sent) {
+        l->want_sent = false;
+        local_wake(l); /* room for what was held back */
+    }
+    return ERR_OK;
+}
+
+static void local_do(void *ctx)
+{
+    local_call_t *c = ctx;
+    local_t *l = (c->h >= 0 && c->h < LOCAL_MAX) ? &s_local[c->h] : NULL;
+    ip_addr_t lo;
+
+    c->ret = -1;
+    switch (c->op) {
+    case LC_OPEN:
+        for (int i = 0; i < LOCAL_MAX && c->ret < 0; i++) {
+            if (s_local[i].state == L_FREE) {
+                c->ret = i;
+            }
+        }
+        if (c->ret < 0) {
+            break;
+        }
+        l = &s_local[c->ret];
+        memset(l, 0, sizeof(*l));
+        l->pcb = tcp_new_ip_type(IPADDR_TYPE_V4);
+        if (!l->pcb) {
+            c->ret = -1;
+            break;
+        }
+        if (!s_wake_tx) {
+            s_wake_tx = udp_new();
+        }
+        l->state = L_CONNECTING;
+        tcp_arg(l->pcb, l);
+        tcp_recv(l->pcb, local_recv);
+        tcp_err(l->pcb, local_err);
+        tcp_sent(l->pcb, local_sent);
+        tcp_nagle_disable(l->pcb); /* LC_WRITE decides when to send */
+        IP_ADDR4(&lo, 127, 0, 0, 1);
+        if (tcp_connect(l->pcb, &lo, c->port, local_connected) != ERR_OK) {
+            tcp_arg(l->pcb, NULL);
+            tcp_abort(l->pcb);
+            memset(l, 0, sizeof(*l));
+            c->ret = -1;
+        }
+        break;
+
+    case LC_READ:
+        if (!l || l->state == L_FREE) {
+            break;
+        }
+        c->ret = 0;
+        if (l->rx) {
+            u16_t n = pbuf_copy_partial(l->rx, c->buf, (u16_t)(c->len > 0xffff ? 0xffff : c->len), 0);
+            l->rx = pbuf_free_header(l->rx, n);
+            if (l->pcb) {
+                tcp_recved(l->pcb, n); /* opens the window by what was read */
+            }
+            c->ret = n;
+        }
+        if (c->ret == 0 && (l->eof || !l->pcb)) {
+            c->ret = -1;
+        }
+        break;
+
+    case LC_WRITE:
+        if (!l || !l->pcb || l->state != L_OPEN) {
+            break;
+        } else {
+            struct tcp_pcb *pcb = l->pcb;
+            size_t n = c->len < tcp_sndbuf(pcb) ? c->len : tcp_sndbuf(pcb);
+            err_t err = n ? tcp_write(pcb, c->buf, (u16_t)n, TCP_WRITE_FLAG_COPY) : ERR_MEM;
+            if (err == ERR_MEM) {
+                l->want_sent = true; /* later: local_sent() wakes the task */
+                c->ret = 0;
+            } else if (err == ERR_OK) {
+                if ((u32_t)(pcb->snd_lbb - pcb->snd_nxt) >= LOCAL_FLUSH_AT || pcb->unacked == NULL) {
+                    tcp_output(pcb);
+                } else {
+                    s_unflushed = true;
+                }
+                c->ret = (int)n;
+            }
+        }
+        break;
+
+    case LC_FLUSH:
+        for (int i = 0; i < LOCAL_MAX; i++) {
+            if (s_local[i].state == L_OPEN && s_local[i].pcb) {
+                tcp_output(s_local[i].pcb);
+            }
+        }
+        c->ret = 0;
+        break;
+
+    case LC_CLOSE:
+        if (!l || l->state == L_FREE) {
+            break;
+        }
+        if (l->pcb) {
+            tcp_arg(l->pcb, NULL);
+            tcp_recv(l->pcb, local_recv); /* with no argument it discards */
+            tcp_err(l->pcb, NULL);
+            tcp_sent(l->pcb, NULL);
+            if (tcp_close(l->pcb) != ERR_OK) {
+                tcp_abort(l->pcb);
+            }
+        }
+        if (l->rx) {
+            pbuf_free(l->rx);
+        }
+        memset(l, 0, sizeof(*l));
+        c->ret = 0;
+        for (int i = 0; i < LOCAL_MAX; i++) {
+            if (s_local[i].state != L_FREE) {
+                c->ret = 1; /* others are still open */
+            }
+        }
+        if (c->ret == 0 && s_wake_tx) {
+            udp_remove(s_wake_tx);
+            s_wake_tx = NULL;
+        }
+        break;
+    }
+}
+
+static int local_call(local_call_t *c)
+{
+    return tcpip_callback_wait(local_do, c) == ERR_OK ? c->ret : -1;
+}
+
+static void local_wake_close(void)
+{
+    if (s_wake_fd >= 0) {
+        close(s_wake_fd);
+        s_wake_fd = -1;
+    }
+}
+
+int ps_local_open(uint16_t port)
+{
+    if (s_wake_fd < 0) {
+        struct sockaddr_in addr = { .sin_family = AF_INET };
+        socklen_t len = sizeof(addr);
+        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        int fd = socket(AF_INET, SOCK_DGRAM, 0);
+        if (fd < 0 || bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
+            getsockname(fd, (struct sockaddr *)&addr, &len) != 0) {
+            if (fd >= 0) {
+                close(fd);
+            }
+            return -1;
+        }
+        ps_set_nonblock(fd);
+        s_wake_port = ntohs(addr.sin_port);
+        s_wake_fd = fd;
+    }
+    local_call_t c = { .op = LC_OPEN, .h = -1, .port = port };
+    int h = local_call(&c);
+    if (h < 0) {
+        bool any = false;
+        for (int i = 0; i < LOCAL_MAX; i++) {
+            any = any || s_local[i].state != L_FREE;
+        }
+        if (!any) {
+            local_wake_close();
+        }
+    }
+    return h;
+}
+
+int ps_local_state(int h)
+{
+    uint8_t st = s_local[h].state;
+    return st == L_OPEN ? 1 : st == L_CONNECTING ? 0 : -1;
+}
+
+void ps_local_want(int h, size_t bytes) { s_local[h].want = (uint16_t)bytes; }
+
+/* Only a hint: lwIP's thread may be adding to the queue at this moment. */
+int ps_local_avail(int h)
+{
+    struct pbuf *rx = s_local[h].rx;
+    return rx ? rx->tot_len : 0;
+}
+
+int ps_local_read(int h, void *buf, size_t len)
+{
+    local_t *l = &s_local[h];
+    if (!l->rx && !l->eof && l->pcb) {
+        return 0; /* nothing queued: no need to ask lwIP's thread */
+    }
+    local_call_t c = { .op = LC_READ, .h = h, .buf = buf, .len = len };
+    return local_call(&c);
+}
+
+int ps_local_write(int h, const void *buf, size_t len)
+{
+    local_call_t c = { .op = LC_WRITE, .h = h, .buf = (void *)buf, .len = len };
+    return local_call(&c);
+}
+
+void ps_local_close(int h)
+{
+    local_call_t c = { .op = LC_CLOSE, .h = h };
+    if (local_call(&c) == 0) {
+        local_wake_close(); /* the last one */
+    }
+}
+
+void ps_local_watch(int h, bool connecting, bool want_read, bool want_write,
+                    fd_set *r, fd_set *w, fd_set *e, int *maxfd)
+{
+    s_sleeping = true; /* from here on, news sends the datagram */
+    if (s_wake_fd >= 0) {
+        FD_SET(s_wake_fd, r);
+        if (s_wake_fd > *maxfd) {
+            *maxfd = s_wake_fd;
+        }
+    }
+}
+
+void ps_local_flush(void)
+{
+    if (s_unflushed) {
+        local_call_t c = { .op = LC_FLUSH, .h = -1 };
+        s_unflushed = false;
+        local_call(&c);
+    }
+}
+
+/* Set after ps_local_watch() raised s_sleeping, so nothing falls between
+ * this check and select(): later news sends the datagram. */
+bool ps_local_ready(void)
+{
+    for (int i = 0; i < LOCAL_MAX; i++) {
+        if (s_local[i].state != L_FREE && s_local[i].news) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void ps_local_poll(const fd_set *readable)
+{
+    char b[4];
+    s_sleeping = false;
+    /* Cleared before the task looks: news that arrives meanwhile sets it again. */
+    for (int i = 0; i < LOCAL_MAX; i++) {
+        s_local[i].news = false;
+    }
+    if (s_wake_fd >= 0 && (s_wake_sent || FD_ISSET(s_wake_fd, readable))) {
+        s_wake_sent = false;
+        recv(s_wake_fd, b, sizeof(b), 0);
+    }
 }
 
 /* Trying to connect before the network has an address only fills the log

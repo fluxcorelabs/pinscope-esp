@@ -15,7 +15,7 @@ In your project's `main/idf_component.yml`:
 ```yaml
 dependencies:
   pinscope:
-    git: https://github.com/fluxcorelabs/pinscope-esp.git
+    git: https://github.com/pinscope-dev/pinscope-esp.git
 ```
 
 The build downloads it the next time it runs. To pin a version, add
@@ -112,25 +112,23 @@ written the tunnel is busy, so requests to the device wait.
 
 ## Resources
 
-- RAM: 9.3 KB in total while connected (measured on an ESP32-S2): 4.8 KB
+- RAM: 9.4 KB in total while connected (measured on an ESP32-S2): 4.9 KB
   static (frame buffers of 1 KiB out and 512 B in, a 2 KiB outbox for logs
   and metrics, the rest of the state) and a 3 KiB task stack. The sizes are
   fixed; there is nothing to tune.
-- Flash: 16.8 KB for the component.
+- Flash: 18.2 KB for the component.
 - No TLS library and no DNS cache: the connection is a Noise handshake
   (X25519) and ChaCha20-Poly1305 implemented in the component, and the
   service's name is looked up with one query per connection.
 - Network: one outbound TCP connection to the service on port 443, so it
   passes networks that only let HTTPS out. Only firewalls that inspect
   traffic and allow nothing but TLS on that port block it.
-- Sockets: one for the tunnel and two per open stream. The 2 streams fit the
-  stock `CONFIG_LWIP_MAX_SOCKETS=10`.
-- The component raises lwIP's `CONFIG_LWIP_TCP_RECVMBOX_SIZE` from 6 to 32
-  for the project (about 100 bytes per open TCP socket). With 6, lwIP drops
-  packets when your web server answers in many small pieces, and large
-  downloads through the tunnel pause for seconds. A project that already has
-  an `sdkconfig` keeps the value saved in it: Pinscope logs a warning when
-  that is below 16, and `idf.py menuconfig` → lwIP → TCP changes it.
+- Sockets: two of its own (the connection to the service, and a loopback UDP
+  socket that wakes its task) and, per open stream, the one your server
+  accepts. The 2 streams fit the stock `CONFIG_LWIP_MAX_SOCKETS=10`.
+- Nothing in your lwIP configuration has to change. The component reaches
+  your servers through lwIP's callback API, so the per-socket limit on
+  received packets (`CONFIG_LWIP_TCP_RECVMBOX_SIZE`) does not apply to it.
 - If your HTTP server answers slowly through the tunnel, set `TCP_NODELAY` on
   its connections (see `examples/esp-idf-basic`): `esp_http_server` sends
   headers and body separately, which otherwise costs about 250 ms per request.

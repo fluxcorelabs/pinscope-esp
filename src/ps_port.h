@@ -111,6 +111,25 @@ uint16_t ps_port_default_metrics(void);
 /* Report the selected PINSCOPE_M_* groups through pinscope_metric(). */
 void ps_port_sys_metrics(uint16_t mask);
 
+/* Connections to the servers on this device, one per open stream. Nothing
+ * here blocks. A handle is >= 0. */
+int  ps_local_open(uint16_t port);                     /* handle, or -1: none to spare */
+int  ps_local_state(int h);                            /* 0 connecting, 1 open, -1 failed */
+int  ps_local_read(int h, void *buf, size_t len);      /* > 0 bytes, 0 nothing now, < 0 closed */
+int  ps_local_write(int h, const void *buf, size_t len); /* bytes taken, 0 none now, < 0 failed */
+int  ps_local_avail(int h);                            /* bytes ps_local_read() would give, -1 unknown */
+void ps_local_want(int h, size_t bytes);               /* no need to wake the loop for less than this */
+void ps_local_close(int h);
+/* Adds to the sets what select() must watch for the loop to wake when the
+ * handle has news of the kinds asked for, and raises *maxfd. */
+void ps_local_watch(int h, bool connecting, bool want_read, bool want_write,
+                    fd_set *r, fd_set *w, fd_set *e, int *maxfd);
+void ps_local_flush(void); /* before select(): send what ps_local_write() held back */
+/* After ps_local_watch() and right before select(): true when a handle has
+ * news already, so select() must not wait. */
+bool ps_local_ready(void);
+void ps_local_poll(const fd_set *readable); /* after select() */
+
 /* False while the device has no network address, so that connecting is not
  * even tried. */
 bool ps_port_network_ready(void);

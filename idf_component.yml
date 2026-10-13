@@ -1,4 +1,4 @@
-version: "0.2.3"
+version: "0.2.4"
 description: Remote HTTP/WebSocket access, logs and metrics for ESP32 over one outbound connection
 dependencies:
   idf: ">=5.0"

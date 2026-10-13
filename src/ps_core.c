@@ -100,6 +100,7 @@ enum {
 #define HANDSHAKE_MS       10000
 #define LOCAL_CONNECT_MS   3000
 #define LOCAL_BURST        4     /* frames taken from one stream before looking elsewhere */
+#define HOLD_MS            20    /* how long a partial frame waits for the rest */
 #define STALL_TIMEOUT_MS   5000
 #define BACKOFF_MIN_MS     1000
 #define BACKOFF_MAX_MS     60000
@@ -111,9 +112,12 @@ enum { ST_FREE = 0, ST_CONNECTING, ST_OPEN };
 typedef struct {
     uint16_t id;
     uint8_t  state;
-    int      fd;
+    int      h;        /* the connection to the local server (ps_local_*) */
     uint32_t credit;   /* bytes we may still send to the cloud */
     uint32_t deadline; /* local connect deadline */
+    bool     bulk;     /* the last frame from it was full: more is on the way */
+    bool     held;     /* a piece smaller than a frame is waiting for the rest */
+    uint32_t held_since;
 } stream_t;
 
 static struct {
@@ -132,6 +136,7 @@ static struct {
 
     volatile uint8_t state;
     volatile bool    stop, kick, running;
+    uint32_t hold_ms;    /* a stream is waiting this much longer for the rest of a frame */
 
     int      fd;         /* connection to the service, -1 when there is none */
     bool     io_err;
@@ -400,7 +405,7 @@ static void stream_free(stream_t *s, bool notify)
     if (s->state == ST_FREE) {
         return;
     }
-    ps_closesocket(s->fd);
+    ps_local_close(s->h);
     s->state = ST_FREE;
     if (g.pend_s == s) {
         g.pend_s = NULL;
@@ -414,7 +419,7 @@ static void stream_free(stream_t *s, bool notify)
 static void flush_pending(void)
 {
     stream_t *s = g.pend_s;
-    int n = (int)send(s->fd, (const char *)g.pend, g.pend_len, PS_SEND_FLAGS);
+    int n = ps_local_write(s->h, g.pend, g.pend_len);
     if (n > 0) {
         g.pend += n;
         g.pend_len = (uint16_t)(g.pend_len - n);
@@ -422,7 +427,7 @@ static void flush_pending(void)
         if (g.pend_len == 0) {
             g.pend_s = NULL;
         }
-    } else if (n < 0 && !ps_sock_wouldblock()) {
+    } else if (n < 0) {
         stream_free(s, true);
     }
 }
@@ -436,18 +441,14 @@ static bool pump_local(stream_t *s)
      * encryption and one packet on the air instead of several. */
     uint32_t max = s->credit < FRAME ? s->credit : FRAME, got = 0;
     char *buf = (char *)g.tx + LEN_HDR + PS_HDR;
-    bool closed = false;
-    while (got < max) {
-        int n = (int)recv(s->fd, buf + got, (int)(max - got), 0);
-        if (n > 0) {
-            got += (uint32_t)n;
-            continue;
-        }
-        closed = n == 0 || !ps_sock_wouldblock();
-        break;
+    int n = ps_local_read(s->h, buf, (size_t)max); /* all that is queued, up to a frame */
+    bool closed = n < 0;
+    if (n > 0) {
+        got = (uint32_t)n;
     }
     if (got) {
         s->credit -= got;
+        s->bulk = got == FRAME;
         send_frame(T_DATA, s->id, (uint16_t)got);
     }
     if (closed) {
@@ -481,30 +482,16 @@ static void on_open(uint16_t id, const uint8_t *b, uint16_t n)
         return;
     }
     /* Out of slots or sockets: the server lowers its limit and retries. */
-    int fd = s ? (int)socket(AF_INET, SOCK_STREAM, 0) : -1;
-    if (fd < 0) {
+    int h = s ? ps_local_open(port) : -1;
+    if (h < 0) {
         send_close(id, CLOSE_BUSY);
         return;
     }
-    int one = 1;
-    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const char *)&one, sizeof(one));
-    ps_set_nonblock(fd);
-
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    int rc = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
-    if (rc != 0 && !ps_sock_inprogress()) {
-        ps_closesocket(fd);
-        send_close(id, CLOSE_REFUSED);
-        return;
-    }
     s->id = id;
-    s->fd = fd;
+    s->h = h;
     s->credit = n >= 6 ? be32(b + 2) : 4096;
-    s->state = rc == 0 ? ST_OPEN : ST_CONNECTING;
+    s->state = ST_CONNECTING;
+    s->bulk = s->held = false;
     s->deadline = ps_port_millis() + LOCAL_CONNECT_MS;
 }
 
@@ -617,6 +604,7 @@ static int dispatch(void)
         break;
     case T_DATA:
         if (s && blen) {
+            s->bulk = false; /* a new request: its answer starts at once */
             g.pend = body;
             g.pend_len = blen;
             g.pend_s = s;
@@ -868,6 +856,7 @@ static void run_session(void)
         if (ob_flush() != 0) {
             return;
         }
+        ps_local_flush();
 
         fd_set rf, wf, ef;
         int maxfd = -1;
@@ -883,55 +872,62 @@ static void run_session(void)
             if (s->state == ST_FREE) {
                 continue;
             }
-            if (s->state == ST_CONNECTING) {
-                FD_SET(s->fd, &wf);
-                FD_SET(s->fd, &ef); /* Winsock reports a failed connect here */
-            } else {
-                if (s->credit) {
-                    FD_SET(s->fd, &rf);
-                }
-                if (g.pend_s == s) {
-                    FD_SET(s->fd, &wf);
-                }
-            }
-            if (s->fd > maxfd) {
-                maxfd = s->fd;
-            }
+            ps_local_watch(s->h, s->state == ST_CONNECTING, s->state == ST_OPEN && s->credit, g.pend_s == s,
+                           &rf, &wf, &ef, &maxfd);
         }
-        struct timeval tv = { 0, (long)poll_us };
+        /* News that came while the loop was busy must not wait for a timeout. */
+        struct timeval tv = { 0, ps_local_ready() ? 0 : g.hold_ms ? (long)g.hold_ms * 1000 : (long)poll_us };
+        g.hold_ms = 0;
         if (select(maxfd + 1, &rf, &wf, &ef, &tv) < 0) {
             ps_port_sleep(20);
             continue;
         }
 
         now = ps_port_millis();
+        ps_local_poll(&rf);
         for (int i = 0; i < STREAMS; i++) {
             stream_t *s = &g.streams[i];
             if (s->state == ST_CONNECTING) {
-                if (FD_ISSET(s->fd, &wf) || FD_ISSET(s->fd, &ef)) {
-                    int err = 0;
-                    socklen_t len = sizeof(err);
-                    getsockopt(s->fd, SOL_SOCKET, SO_ERROR, (char *)&err, &len);
-                    if (err == 0 && !FD_ISSET(s->fd, &ef)) {
-                        s->state = ST_OPEN;
-                        if (g.pend_s == s) {
-                            flush_pending();
-                        }
-                    } else {
-                        stream_free(s, true);
-                    }
-                } else if ((int32_t)(now - s->deadline) >= 0) {
+                int st = ps_local_state(s->h);
+                if (st > 0) {
+                    s->state = ST_OPEN;
+                } else if (st < 0 || (int32_t)(now - s->deadline) >= 0) {
                     stream_free(s, true);
                 }
-            } else if (s->state == ST_OPEN) {
-                if (g.pend_s == s && FD_ISSET(s->fd, &wf)) {
+            }
+            if (s->state == ST_OPEN) {
+                if (g.pend_s == s) {
                     flush_pending();
                 }
-                if (s->state == ST_OPEN && FD_ISSET(s->fd, &rf)) {
-                    /* Keep up with a server that is sending a lot: lwIP holds
-                     * only a few received packets per socket and drops the
-                     * rest, which the sender then repeats 1.5 s later. */
-                    for (int burst = 0; burst < LOCAL_BURST && pump_local(s); burst++) {
+                /* Whatever woke the loop, take what the local server has
+                 * sent, a few frames at a time so no stream waits long. */
+                for (int burst = 0; s->state == ST_OPEN && s->credit && burst < LOCAL_BURST; burst++) {
+                    /* In the middle of a large answer the server's pieces do
+                     * not line up with frames. A leftover smaller than a
+                     * frame waits for what follows instead of going out as a
+                     * tiny frame of its own: the loop is woken when a whole
+                     * frame is there, and sends what there is once the
+                     * server has been quiet for HOLD_MS. */
+                    int avail = ps_local_avail(s->h);
+                    uint32_t want = s->credit < FRAME ? s->credit : FRAME;
+                    if (s->bulk && avail > 0 && (uint32_t)avail < want) {
+                        if (!s->held) {
+                            s->held = true;
+                            s->held_since = now;
+                        }
+                        uint32_t waited = (uint32_t)(now - s->held_since);
+                        if (waited < HOLD_MS) {
+                            if (!g.hold_ms || HOLD_MS - waited < g.hold_ms) {
+                                g.hold_ms = HOLD_MS - waited;
+                            }
+                            ps_local_want(s->h, want);
+                            break;
+                        }
+                    }
+                    s->held = false;
+                    ps_local_want(s->h, 1);
+                    if (!pump_local(s)) {
+                        break;
                     }
                 }
             }
