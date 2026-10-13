@@ -1,0 +1,10 @@
+# lwIP keeps at most this many received packets per TCP socket and drops the
+# rest. Its default of 6 is too few for the loopback connection between
+# Pinscope and a web server that answers in small pieces: large downloads
+# through the tunnel then pause for seconds. This raises the default for
+# projects that use the component (about 100 bytes per open socket); a value
+# set in sdkconfig or sdkconfig.defaults still wins.
+# ignore: multiple-definition
+config LWIP_TCP_RECVMBOX_SIZE
+    int
+    default 32

@@ -98,7 +98,7 @@ int ps_port_init(void)
 #if defined(CONFIG_LWIP_TCP_RECVMBOX_SIZE) && CONFIG_LWIP_TCP_RECVMBOX_SIZE < 16
     /* lwIP drops what does not fit; the local server then repeats it 1.5 s
      * later, which shows as downloads that pause. */
-    ESP_LOGW(TAG, "CONFIG_LWIP_TCP_RECVMBOX_SIZE is %d: set it to 32 in sdkconfig, "
+    ESP_LOGW(TAG, "CONFIG_LWIP_TCP_RECVMBOX_SIZE is %d in this project's sdkconfig: set it to 32, "
              "or large downloads through the tunnel will pause", CONFIG_LWIP_TCP_RECVMBOX_SIZE);
 #endif
     return 0;
