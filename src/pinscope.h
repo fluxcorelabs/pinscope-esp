@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: LicenseRef-Pinscope-Device-1.0
- * Copyright (c) 2026 FluxCore Labs. See LICENSE: for use with the Pinscope service only. */
+ * Copyright (c) 2026 Pinscope Ltd. See LICENSE: for use with the Pinscope service only. */
 /*
  * Pinscope - remote access and telemetry for embedded devices.
  *

@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: LicenseRef-Pinscope-Device-1.0
- * Copyright (c) 2026 FluxCore Labs. See LICENSE: for use with the Pinscope service only. */
+ * Copyright (c) 2026 Pinscope Ltd. See LICENSE: for use with the Pinscope service only. */
 /*
  * The primitives of the lite transport: X25519, ChaCha20-Poly1305 (RFC 8439)
  * and SHA-256 with HKDF, as the Noise framework combines them. Standard

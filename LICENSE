@@ -1,14 +1,14 @@
 Pinscope Device Component License, version 1.0
 
-Copyright (c) 2026 FluxCore Labs. All rights reserved.
+Copyright (c) 2026 Pinscope Ltd. All rights reserved.
 
 This license covers the Pinscope device component ("the Software"): the source
 code distributed with this file, which is built into firmware to connect a
-device to the Pinscope service operated by FluxCore Labs ("the Service").
+device to the Pinscope service operated by Pinscope Ltd ("the Service").
 
 1. What you may do
 
-   Subject to the conditions below, FluxCore Labs grants you a worldwide,
+   Subject to the conditions below, Pinscope Ltd grants you a worldwide,
    royalty-free, non-exclusive permission to:
 
    a. use, copy and modify the Software;
@@ -35,14 +35,14 @@ device to the Pinscope service operated by FluxCore Labs ("the Service").
 
    Keep the copyright notice and this license in every copy of the source
    code. Firmware distributed in binary form does not need to display them.
-   This license gives no right to use the names "Pinscope" or "FluxCore Labs",
+   This license gives no right to use the names "Pinscope" or "Pinscope Ltd",
    or their marks, except to state truthfully that a product connects to the
    Service.
 
 4. Contributions
 
-   If you send FluxCore Labs a change to the Software, you agree that FluxCore
-   Labs may use, modify and distribute it under any terms, without obligation
+   If you send Pinscope Ltd a change to the Software, you agree that Pinscope
+   Ltd may use, modify and distribute it under any terms, without obligation
    to you.
 
 5. No warranty
@@ -53,7 +53,7 @@ device to the Pinscope service operated by FluxCore Labs ("the Service").
 
 6. Limitation of liability
 
-   TO THE EXTENT THE LAW ALLOWS, IN NO EVENT SHALL FLUXCORE LABS BE LIABLE FOR
+   TO THE EXTENT THE LAW ALLOWS, IN NO EVENT SHALL PINSCOPE LTD BE LIABLE FOR
    ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
    TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
    OR ITS USE, INCLUDING ANY DEVICE THAT FAILS OR IS DAMAGED.
