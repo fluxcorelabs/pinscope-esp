@@ -25,7 +25,12 @@ The build downloads it the next time it runs. To pin a version, add
 
 1. `idf.py menuconfig` → **Pinscope**: enter the project key from the
    dashboard.
-2. Call it once, any time after `esp_netif_init()` and
+2. Add `CONFIG_LWIP_TCP_RECVMBOX_SIZE=32` to your `sdkconfig.defaults` (or set
+   it in menuconfig under lwIP → TCP). With the default of 6, lwIP drops
+   packets when your web server answers in many small pieces, and large
+   downloads through the tunnel pause for seconds. Pinscope logs a warning
+   when it is missing.
+3. Call it once, any time after `esp_netif_init()` and
    `esp_event_loop_create_default()`:
 
 ```c
@@ -112,7 +117,7 @@ written the tunnel is busy, so requests to the device wait.
 
 ## Resources
 
-- RAM: 9.2 KB in total while connected (measured on an ESP32-S2): 4.8 KB
+- RAM: 9.3 KB in total while connected (measured on an ESP32-S2): 4.8 KB
   static (frame buffers of 1 KiB out and 512 B in, a 2 KiB outbox for logs
   and metrics, the rest of the state) and a 3 KiB task stack. The sizes are
   fixed; there is nothing to tune.
@@ -125,6 +130,8 @@ written the tunnel is busy, so requests to the device wait.
   traffic and allow nothing but TLS on that port block it.
 - Sockets: one for the tunnel and two per open stream. The 2 streams fit the
   stock `CONFIG_LWIP_MAX_SOCKETS=10`.
+- `CONFIG_LWIP_TCP_RECVMBOX_SIZE=32` (step 2 above) costs about 100 bytes
+  per open TCP socket in your application.
 - If your HTTP server answers slowly through the tunnel, set `TCP_NODELAY` on
   its connections (see `examples/esp-idf-basic`): `esp_http_server` sends
   headers and body separately, which otherwise costs about 250 ms per request.

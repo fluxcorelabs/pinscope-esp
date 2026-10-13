@@ -95,6 +95,12 @@ int ps_port_init(void)
     esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, on_got_ip, NULL);
     esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, on_wifi_disconnect, NULL);
     s_boot_id = esp_random();
+#if defined(CONFIG_LWIP_TCP_RECVMBOX_SIZE) && CONFIG_LWIP_TCP_RECVMBOX_SIZE < 16
+    /* lwIP drops what does not fit; the local server then repeats it 1.5 s
+     * later, which shows as downloads that pause. */
+    ESP_LOGW(TAG, "CONFIG_LWIP_TCP_RECVMBOX_SIZE is %d: set it to 32 in sdkconfig, "
+             "or large downloads through the tunnel will pause", CONFIG_LWIP_TCP_RECVMBOX_SIZE);
+#endif
     return 0;
 }
 
@@ -234,6 +240,7 @@ void ps_port_log_capture(bool on)
  */
 
 #define CRASH_MAGIC  0x50534352u /* "PSCR" */
+#define CRASH_MAGIC2 0x50534332u /* "PSC2": the fields after `task` are set */
 #define CRASH_FRAMES 24
 
 typedef struct {
@@ -245,9 +252,23 @@ typedef struct {
     char     reason[40];
     char     detail[72];
     char     task[16];
+    /* Added in 0.2.1, at the end so that older firmware still reads the rest.
+     * The image that crashed is not always the one that reports it: after a
+     * bad update the bootloader goes back to the previous image. */
+    uint32_t magic2;
+    char     elf[17]; /* start of the crashed image's ELF hash */
 } crash_record_t;
 
 static RTC_NOINIT_ATTR crash_record_t s_crash;
+
+/* This image's ELF hash, read once at start-up: the panic handler may run
+ * with the flash cache off and must not call into flash for it. */
+static char s_elf[17];
+
+static void __attribute__((constructor)) remember_elf(void)
+{
+    esp_app_get_elf_sha256(s_elf, sizeof(s_elf));
+}
 
 #ifdef CONFIG_PINSCOPE_CRASH_CAPTURE
 
@@ -266,6 +287,7 @@ void __wrap_esp_panic_handler(panic_info_t *info)
 {
     crash_record_t *r = &s_crash;
     r->magic = 0;
+    r->magic2 = 0;
     r->count = 0;
     r->approx = 0;
     r->pc = (uint32_t)(uintptr_t)info->addr;
@@ -297,6 +319,8 @@ void __wrap_esp_panic_handler(panic_info_t *info)
         }
 #endif
     }
+    memcpy(r->elf, s_elf, sizeof(r->elf));
+    r->magic2 = CRASH_MAGIC2;
     r->magic = CRASH_MAGIC;
     __real_esp_panic_handler(info);
 }
@@ -311,8 +335,17 @@ int ps_port_crash_read(char *buf, size_t len)
     }
     r->reason[sizeof(r->reason) - 1] = r->detail[sizeof(r->detail) - 1] = '\0';
     r->task[sizeof(r->task) - 1] = '\0';
-    int n = snprintf(buf, len, "crash\nreason=%s\ndetail=%s\ntask=%s\npc=0x%08x\napprox=%d\nbt=",
+    int n = snprintf(buf, len, "crash\nreason=%s\ndetail=%s\ntask=%s\npc=0x%08x\napprox=%d\n",
                      r->reason, r->detail, r->task, (unsigned)r->pc, (int)r->approx);
+    if (r->magic2 == CRASH_MAGIC2 && n > 0 && (size_t)n + sizeof(r->elf) + 8 < len) {
+        r->elf[sizeof(r->elf) - 1] = '\0';
+        if (strspn(r->elf, "0123456789abcdef") == strlen(r->elf) && r->elf[0]) {
+            n += snprintf(buf + n, len - (size_t)n, "elf=%s\n", r->elf);
+        }
+    }
+    if (n > 0 && (size_t)n + 4 < len) {
+        n += snprintf(buf + n, len - (size_t)n, "bt=");
+    }
     for (int i = 0; i < r->count && n > 0 && (size_t)n + 12 < len; i++) {
         n += snprintf(buf + n, len - (size_t)n, i ? " 0x%08x" : "0x%08x", (unsigned)r->addr[i]);
     }

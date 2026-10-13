@@ -99,6 +99,7 @@ enum {
 #define IO_TIMEOUT_MS      10000
 #define HANDSHAKE_MS       10000
 #define LOCAL_CONNECT_MS   3000
+#define LOCAL_BURST        4     /* frames taken from one stream before looking elsewhere */
 #define STALL_TIMEOUT_MS   5000
 #define BACKOFF_MIN_MS     1000
 #define BACKOFF_MAX_MS     60000
@@ -426,7 +427,9 @@ static void flush_pending(void)
     }
 }
 
-static void pump_local(stream_t *s)
+/* One frame of what the local server has sent. True when the frame was full,
+ * so more is probably waiting. */
+static bool pump_local(stream_t *s)
 {
     /* Servers often write a response in small pieces (a chunk header, the
      * data, a CRLF). Everything already queued goes into one frame: one
@@ -449,7 +452,9 @@ static void pump_local(stream_t *s)
     }
     if (closed) {
         stream_free(s, true); /* local server closed the connection */
+        return false;
     }
+    return got == FRAME && s->credit && !g.io_err;
 }
 
 static void on_open(uint16_t id, const uint8_t *b, uint16_t n)
@@ -923,7 +928,11 @@ static void run_session(void)
                     flush_pending();
                 }
                 if (s->state == ST_OPEN && FD_ISSET(s->fd, &rf)) {
-                    pump_local(s);
+                    /* Keep up with a server that is sending a lot: lwIP holds
+                     * only a few received packets per socket and drops the
+                     * rest, which the sender then repeats 1.5 s later. */
+                    for (int burst = 0; burst < LOCAL_BURST && pump_local(s); burst++) {
+                    }
                 }
             }
         }

@@ -1,5 +1,11 @@
 CONFIG_HTTPD_WS_SUPPORT=y
 
+# lwIP keeps at most this many received packets per TCP socket and drops the
+# rest. The default of 6 is too few for a web server that answers in small
+# pieces: large downloads through the tunnel then pause for seconds. Costs
+# about 100 bytes per open socket.
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=32
+
 # Two OTA slots so the firmware can be updated from the Pinscope dashboard.
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
