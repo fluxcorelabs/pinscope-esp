@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: LicenseRef-Pinscope-Device-1.0
- * Copyright (c) 2026 Pinscope Ltd. See LICENSE: for use with the Pinscope service only. */
+ * Copyright (c) 2026 Filip Code. See LICENSE: for use with the Pinscope service only. */
 /*
  * Pinscope core: encrypted connection to the service, stream multiplexer and
  * outbox. Portable C, single task. All buffers are static and fixed in size;
