@@ -1025,7 +1025,8 @@ static void task_main(void *arg)
         if (rc == -2) {
             set_state(PINSCOPE_REJECTED);
             ps_port_logf(PS_LOG_ERROR,
-                         "credentials refused - check the project key, or reset this "
+                         "credentials refused - check the project key, that the account's "
+                         "email is confirmed and the plan has a free device, or reset this "
                          "device's credential in the dashboard");
             wait = BACKOFF_REJECT_MS;
         } else {

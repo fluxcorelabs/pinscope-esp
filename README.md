@@ -13,7 +13,7 @@ C6, C61). You need a Pinscope account for the project key.
 From your project's folder:
 
 ```sh
-idf.py add-dependency "pinscope/pinscope^0.2.6"
+idf.py add-dependency "pinscope/pinscope^0.2.7"
 ```
 
 The build downloads it from the
