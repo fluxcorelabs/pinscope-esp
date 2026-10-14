@@ -1,4 +1,4 @@
-version: "0.2.4"
+version: "0.2.5"
 description: Remote access to the device's web server, logs, metrics, crash reports and OTA updates for ESP32, in under 10 KB of RAM
 url: "https://pinscope.dev"
 repository: "https://github.com/pinscope-dev/pinscope-esp.git"
@@ -10,5 +10,14 @@ tags:
   - ota
   - logging
   - monitoring
+targets:
+  - esp32
+  - esp32s2
+  - esp32s3
+  - esp32c2
+  - esp32c3
+  - esp32c5
+  - esp32c6
+  - esp32c61
 dependencies:
   idf: ">=5.0"
