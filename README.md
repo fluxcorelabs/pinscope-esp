@@ -10,16 +10,15 @@ C6, C61). You need a Pinscope account for the project key.
 
 ## Add it to a project
 
-In your project's `main/idf_component.yml`:
+From your project's folder:
 
-```yaml
-dependencies:
-  pinscope:
-    git: https://github.com/pinscope-dev/pinscope-esp.git
+```sh
+idf.py add-dependency "pinscope/pinscope^0.2.4"
 ```
 
-The build downloads it the next time it runs. To pin a version, add
-`version: "<tag or commit>"`.
+The build downloads it from the
+[ESP Component Registry](https://components.espressif.com/components/pinscope/pinscope)
+the next time it runs.
 
 ## Use it
 

@@ -4,7 +4,6 @@ url: "https://pinscope.dev"
 repository: "https://github.com/pinscope-dev/pinscope-esp.git"
 documentation: "https://pinscope.dev/docs"
 issues: "https://github.com/pinscope-dev/pinscope-esp/issues"
-license: "LicenseRef-Pinscope-Device-1.0"
 tags:
   - remote-access
   - tunnel
