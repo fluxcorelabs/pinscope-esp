@@ -1,9 +1,9 @@
 # Pinscope for ESP32
 
-The device side of [Pinscope](https://pinscope.dev): it gives the
-web server on an ESP32 a secure public URL and sends logs, metrics and crash
-reports, and receives firmware updates, over one outbound connection that
-needs under 10 KB of RAM.
+The device side of [Pinscope](https://pinscope.dev): it gives the web server
+on an ESP32 its own HTTPS address, sends logs, metrics and crash reports, and
+receives firmware updates, over one outbound connection that needs 9.4 KB of
+RAM in total.
 
 For ESP-IDF 5.x and 6.x, on every ESP32 with WiFi (ESP32, S2, S3, C2, C3, C5,
 C6, C61). You need a Pinscope account for the project key.
