@@ -1,6 +1,6 @@
 {
   "name": "pinscope",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "description": "Remote access to the device's web server, logs, metrics, crash reports and OTA updates for ESP32, in under 10 KB of RAM",
   "keywords": [
     "remote-access",

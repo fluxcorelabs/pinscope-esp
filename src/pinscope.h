@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#define PINSCOPE_VERSION   "0.2.9"
+#define PINSCOPE_VERSION   "0.2.10"
 #define PINSCOPE_MAX_PORTS 4
 
 typedef enum {
@@ -59,6 +59,11 @@ typedef struct {
     uint16_t metrics_interval_s; /* default 60 */
 
     uint8_t  task_priority;  /* default 5 */
+
+    /* The version shown in the dashboard and kept with crash reports and
+     * updates. Default: the app version of the build (PROJECT_VER in
+     * ESP-IDF). Arduino has none of its own, so set it there. */
+    const char *firmware_version;
 } pinscope_config_t;
 
 /* Start the tunnel task. Pass NULL to use build-time defaults only.

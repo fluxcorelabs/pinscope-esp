@@ -49,6 +49,7 @@ void setup() {
   // Starts in the background; it waits for WiFi and reconnects on its own.
   pinscope_config_t config = {};
   config.project_key = PINSCOPE_KEY;
+  config.firmware_version = "1.0.0";  // shown in the dashboard; raise it with each build you ship
   pinscope_start(&config);
 }
 

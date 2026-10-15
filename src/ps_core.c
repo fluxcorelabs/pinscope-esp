@@ -752,6 +752,15 @@ static PS_NOINLINE int send_hello(void)
     if (body[n - 1] == ';') {
         n--; /* no platform info */
     }
+    /* A version given in code: later in the list, so the server takes it. */
+    const char *fw = g.cfg.firmware_version;
+    if (fw && fw[0] && n + 40 < FRAME - 1) {
+        body[n++] = ';';
+        n += snprintf(body + n, (size_t)(FRAME - 1 - n), "fw=");
+        for (int i = 0; fw[i] && i < 31; i++) {
+            body[n++] = (fw[i] > ' ' && fw[i] != ';' && fw[i] < 0x7f) ? fw[i] : '_';
+        }
+    }
     body[n++] = '\n';
     return send_frame(T_HELLO, 0, (uint16_t)n);
 }
