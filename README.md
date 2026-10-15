@@ -61,8 +61,9 @@ pinscope_start(&cfg);
 
 ## Arduino
 
-Install the library: in the Arduino IDE, **Sketch → Include Library → Add
-.ZIP Library** with
+Install the library: in the Arduino IDE, **Tools → Manage Libraries**,
+search for **Pinscope**. Or **Sketch → Include Library → Add .ZIP Library**
+with
 [pinscope-esp-0.2.9.zip](https://github.com/pinscope-dev/pinscope-esp/archive/refs/tags/v0.2.9.zip).
 Then **File → Examples → Pinscope → RemoteWebServer** is a complete sketch:
 
