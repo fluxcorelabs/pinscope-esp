@@ -22,7 +22,6 @@
       "maintainer": true
     }
   ],
-  "license": "LicenseRef-Pinscope-Device-1.0",
   "frameworks": [
     "arduino",
     "espidf"
