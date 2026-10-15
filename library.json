@@ -1,0 +1,46 @@
+{
+  "name": "pinscope",
+  "version": "0.2.9",
+  "description": "Remote access to the device's web server, logs, metrics, crash reports and OTA updates for ESP32, in under 10 KB of RAM",
+  "keywords": [
+    "remote-access",
+    "tunnel",
+    "ota",
+    "logging",
+    "monitoring",
+    "esp32"
+  ],
+  "homepage": "https://pinscope.dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pinscope-dev/pinscope-esp.git"
+  },
+  "authors": [
+    {
+      "name": "Pinscope",
+      "url": "https://pinscope.dev",
+      "maintainer": true
+    }
+  ],
+  "license": "LicenseRef-Pinscope-Device-1.0",
+  "frameworks": [
+    "arduino",
+    "espidf"
+  ],
+  "platforms": [
+    "espressif32"
+  ],
+  "headers": "pinscope.h",
+  "export": {
+    "exclude": [
+      "examples/basic",
+      "dist",
+      "build"
+    ]
+  },
+  "build": {
+    "srcDir": "src",
+    "includeDir": "src",
+    "extraScript": "platformio.py"
+  }
+}

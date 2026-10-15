@@ -8,17 +8,30 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "esp_idf_version.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
-#include "esp_app_desc.h"
 #include "esp_attr.h"
-#include "esp_cpu.h"
 #include "esp_debug_helpers.h"
 #include "esp_event.h"
 #include "esp_heap_caps.h"
+/* ESP-IDF 4.4 (Arduino-ESP32 2.x, PlatformIO's default) keeps these elsewhere. */
+#if __has_include("esp_app_desc.h")
+#include "esp_app_desc.h"
+#else
+#define esp_app_get_description esp_ota_get_app_description
+#define esp_app_get_elf_sha256 esp_ota_get_app_elf_sha256
+#endif
+#if __has_include("esp_cpu.h")
+#include "esp_cpu.h"
+#endif
+#if __has_include("esp_memory_utils.h")
 #include "esp_memory_utils.h"
+#else
+#include "soc/soc_memory_layout.h"
+#endif
 #include "esp_private/panic_internal.h"
 #include "esp_log.h"
 #include "esp_mac.h"
@@ -34,10 +47,12 @@
 #include "lwip/tcp.h"
 #include "lwip/tcpip.h"
 #include "lwip/udp.h"
+#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5, 0, 0)
+#include "lwip/priv/tcpip_priv.h" /* tcpip_api_call */
+#endif
 #include "nvs.h"
 #include "sdkconfig.h"
 
-#include "esp_idf_version.h"
 #include "soc/soc_caps.h"
 /* The task iterator moved between ESP-IDF 5 and 6. */
 #if __has_include("freertos/freertos_debug.h")
@@ -47,15 +62,18 @@
 #include "esp_private/freertos_debug.h"
 #define PS_HAVE_TASK_ITERATOR 1
 #endif
-#if SOC_TEMP_SENSOR_SUPPORTED && (defined(CONFIG_PINSCOPE_METRIC_TEMPERATURE) || !defined(CONFIG_PINSCOPE_KCONFIG))
+#if SOC_TEMP_SENSOR_SUPPORTED && __has_include("driver/temperature_sensor.h") && \
+    (defined(CONFIG_PINSCOPE_METRIC_TEMPERATURE) || !defined(CONFIG_PINSCOPE_KCONFIG))
 #include "driver/temperature_sensor.h"
 #define PS_HAVE_TEMP_SENSOR 1
 #endif
+#ifdef CONFIG_PINSCOPE_CRASH_CAPTURE /* the panic handler's frame types */
 #if CONFIG_IDF_TARGET_ARCH_XTENSA
 #include "esp_cpu_utils.h"
 #include "xtensa_context.h"
 #else
 #include "riscv/rvruntime-frames.h"
+#endif
 #endif
 
 #include "pinscope.h"
@@ -85,11 +103,14 @@ static void on_wifi_disconnect(void *arg, esp_event_base_t base, int32_t id, voi
     s_wifi_last_reason = ((wifi_event_sta_disconnected_t *)data)->reason;
 }
 
+static void watch_panics(void);
+
 int ps_port_init(void)
 {
     if (s_lock) {
         return 0;
     }
+    watch_panics();
     s_lock = xSemaphoreCreateMutex();
     if (!s_lock) {
         return -1;
@@ -324,6 +345,60 @@ void __wrap_esp_panic_handler(panic_info_t *info)
 }
 
 #endif /* CONFIG_PINSCOPE_CRASH_CAPTURE */
+
+/* Arduino-ESP32 3.x wraps the panic handler itself and passes the crash on
+ * to one registered handler: Pinscope records it there, and then calls the
+ * handler the application had set, if any. */
+#if !defined(CONFIG_PINSCOPE_CRASH_CAPTURE) && defined(ARDUINO_ARCH_ESP32) && __has_include("esp_arduino_version.h")
+#include "esp_arduino_version.h"
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+#include "esp32-hal.h"
+#define PS_ARDUINO_PANIC 1
+static arduino_panic_handler_t s_app_panic;
+static void *s_app_panic_arg;
+
+static void on_arduino_panic(arduino_panic_info_t *info, void *arg)
+{
+    crash_record_t *r = &s_crash;
+    memset(r, 0, sizeof(*r));
+    r->pc = (uint32_t)(uintptr_t)info->pc;
+    snprintf(r->reason, sizeof(r->reason), "%s", info->reason ? info->reason : "panic");
+    for (char *c = r->reason; *c; c++) {
+        *c = (*c >= 0x20 && *c < 0x7f) ? *c : ' ';
+    }
+    TaskHandle_t task = xTaskGetCurrentTaskHandle();
+    snprintf(r->task, sizeof(r->task), "%s", task ? pcTaskGetName(task) : "");
+#if CONFIG_IDF_TARGET_ARCH_XTENSA
+    unsigned first = 0;
+#else
+    unsigned first = 1; /* the stack pointer, then every stack word that points into code */
+    r->approx = 1;
+    r->addr[r->count++] = r->pc;
+#endif
+    for (unsigned i = first; i < info->backtrace_len && r->count < CRASH_FRAMES; i++) {
+        r->addr[r->count++] = info->backtrace[i];
+    }
+    memcpy(r->elf, s_elf, sizeof(r->elf));
+    r->magic2 = CRASH_MAGIC2;
+    r->magic = CRASH_MAGIC;
+    if (s_app_panic) {
+        s_app_panic(info, s_app_panic_arg);
+    }
+}
+
+static void watch_panics(void)
+{
+    if (get_arduino_panic_handler() != on_arduino_panic) {
+        s_app_panic = get_arduino_panic_handler();
+        s_app_panic_arg = get_arduino_panic_handler_arg();
+        set_arduino_panic_handler(on_arduino_panic, NULL);
+    }
+}
+#endif
+#endif
+#ifndef PS_ARDUINO_PANIC
+static void watch_panics(void) {}
+#endif
 
 int ps_port_crash_read(char *buf, size_t len)
 {
@@ -662,6 +737,9 @@ typedef struct {
 enum { LC_OPEN, LC_READ, LC_WRITE, LC_FLUSH, LC_CLOSE };
 
 typedef struct {
+#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5, 0, 0)
+    struct tcpip_api_call_data call; /* first: lwIP hands this pointer back */
+#endif
     int      op, h, ret;
     uint16_t port;
     void    *buf;
@@ -869,10 +947,24 @@ static void local_do(void *ctx)
     }
 }
 
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
 static int local_call(local_call_t *c)
 {
     return tcpip_callback_wait(local_do, c) == ERR_OK ? c->ret : -1;
 }
+#else
+/* ESP-IDF 4.4's lwIP has no tcpip_callback_wait; tcpip_api_call waits the same way. */
+static err_t local_api(struct tcpip_api_call_data *call)
+{
+    local_do(call);
+    return ERR_OK;
+}
+
+static int local_call(local_call_t *c)
+{
+    return tcpip_api_call(local_api, &c->call) == ERR_OK ? c->ret : -1;
+}
+#endif
 
 static void local_wake_close(void)
 {
@@ -1000,12 +1092,24 @@ void ps_local_poll(const fd_set *readable)
     }
 }
 
+/* The interface that carries traffic: the default one (ESP-IDF 5), or the
+ * WiFi station, then Ethernet (ESP-IDF 4.4 has no "default"). */
+static esp_netif_t *default_netif(void)
+{
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+    return esp_netif_get_default_netif();
+#else
+    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    return netif ? netif : esp_netif_get_handle_from_ifkey("ETH_DEF");
+#endif
+}
+
 /* Trying to connect before the network has an address only fills the log
  * with errors; the got-IP event cuts the wait short once it does. */
 bool ps_port_network_ready(void)
 {
     esp_netif_ip_info_t ip;
-    esp_netif_t *netif = esp_netif_get_default_netif();
+    esp_netif_t *netif = default_netif();
     return netif && esp_netif_get_ip_info(netif, &ip) == ESP_OK && ip.ip.addr != 0;
 }
 
@@ -1105,7 +1209,7 @@ int ps_port_resolve(const char *host, uint8_t *scratch, size_t len, uint32_t *ad
         return 0;
     }
     esp_netif_dns_info_t dns;
-    esp_netif_t *netif = esp_netif_get_default_netif();
+    esp_netif_t *netif = default_netif();
     if (!netif || esp_netif_get_dns_info(netif, ESP_NETIF_DNS_MAIN, &dns) != ESP_OK ||
         dns.ip.type != ESP_IPADDR_TYPE_V4 || dns.ip.u_addr.ip4.addr == 0) {
         return -1;

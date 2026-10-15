@@ -5,15 +5,16 @@ on an ESP32 its own HTTPS address, sends logs, metrics and crash reports, and
 receives firmware updates, over one outbound connection that needs 9.4 KB of
 RAM in total.
 
-For ESP-IDF 5.x and 6.x, on every ESP32 with WiFi (ESP32, S2, S3, C2, C3, C5,
-C6, C61). You need a Pinscope account for the project key.
+For ESP-IDF 5.x and 6.x, Arduino (Arduino-ESP32 2.x and 3.x) and
+PlatformIO, on every ESP32 with WiFi (ESP32, S2, S3, C2, C3, C5, C6, C61).
+You need a Pinscope account for the project key.
 
 ## Add it to a project
 
 From your project's folder:
 
 ```sh
-idf.py add-dependency "pinscope/pinscope^0.2.8"
+idf.py add-dependency "pinscope/pinscope^0.2.9"
 ```
 
 The build downloads it from the
@@ -57,6 +58,44 @@ pinscope_config_t cfg = {
 };
 pinscope_start(&cfg);
 ```
+
+## Arduino
+
+Install the library: in the Arduino IDE, **Sketch → Include Library → Add
+.ZIP Library** with
+[pinscope-esp-0.2.9.zip](https://github.com/pinscope-dev/pinscope-esp/archive/refs/tags/v0.2.9.zip).
+Then **File → Examples → Pinscope → RemoteWebServer** is a complete sketch:
+
+```cpp
+#include <WiFi.h>
+#include <pinscope.h>
+
+void setup() {
+  WiFi.begin("your-network", "your-password");
+  // your web server, on port 80
+
+  pinscope_config_t config = {};
+  config.project_key = "psk_...";   // Connect a device, in the dashboard
+  pinscope_start(&config);
+}
+```
+
+Crash reports need Arduino-ESP32 3.x; everything else also works on 2.x.
+Firmware updates need a partition scheme with two app slots (the default has
+them). Lines passed to `pinscope_log()` reach the dashboard's log; the
+example's `logLine()` sends each line to the serial port and the dashboard.
+
+## PlatformIO
+
+In `platformio.ini`, with the Arduino or the ESP-IDF framework:
+
+```ini
+lib_deps = https://github.com/pinscope-dev/pinscope-esp.git#v0.2.9
+```
+
+and start it with a `pinscope_config_t` as in the Arduino example. Under
+PlatformIO, crash reports work with both frameworks (with Arduino, on
+Arduino-ESP32 3.x).
 
 ## What is sent, and how to turn each off
 

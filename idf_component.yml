@@ -1,4 +1,4 @@
-version: "0.2.8"
+version: "0.2.9"
 description: Remote access to the device's web server, logs, metrics, crash reports and OTA updates for ESP32, in under 10 KB of RAM
 url: "https://pinscope.dev"
 repository: "https://github.com/pinscope-dev/pinscope-esp.git"
