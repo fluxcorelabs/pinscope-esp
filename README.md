@@ -90,8 +90,10 @@ example's `logLine()` sends each line to the serial port and the dashboard.
 In `platformio.ini`, with the Arduino or the ESP-IDF framework:
 
 ```ini
-lib_deps = https://github.com/pinscope-dev/pinscope-esp.git#v0.2.9
+lib_deps = pinscope/pinscope@^0.2.9
 ```
+
+(from the [PlatformIO Registry](https://registry.platformio.org/libraries/pinscope/pinscope))
 
 and start it with a `pinscope_config_t` as in the Arduino example. Under
 PlatformIO, crash reports work with both frameworks (with Arduino, on
