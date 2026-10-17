@@ -1,5 +1,11 @@
 # Pinscope for ESP32
 
+[![ESP Component Registry](https://components.espressif.com/components/pinscope/pinscope/badge.svg)](https://components.espressif.com/components/pinscope/pinscope)
+[![PlatformIO Registry](https://badges.registry.platformio.org/packages/pinscope/library/pinscope.svg)](https://registry.platformio.org/libraries/pinscope/pinscope)
+[![Arduino Library Manager](https://www.ardu-badge.com/badge/Pinscope.svg)](https://www.ardu-badge.com/Pinscope)
+[![Docs](https://img.shields.io/badge/docs-pinscope.dev-9B9CF7)](https://pinscope.dev/docs)
+[![License](https://img.shields.io/badge/license-see%20LICENSE-lightgrey)](LICENSE)
+
 The device side of [Pinscope](https://pinscope.dev): it gives the web server
 on an ESP32 its own HTTPS address, sends logs, metrics and crash reports, and
 receives firmware updates, over one outbound connection that needs 9.4 KB of
