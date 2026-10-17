@@ -15,6 +15,10 @@ For ESP-IDF 5.x and 6.x, Arduino (Arduino-ESP32 2.x and 3.x) and
 PlatformIO, on every ESP32 with WiFi (ESP32, S2, S3, C2, C3, C5, C6, C61).
 You need a Pinscope account for the project key.
 
+[![Two minutes on video: from an empty ESP-IDF project to a decoded crash and an OTA update](https://img.youtube.com/vi/AVuoqsDpeYQ/maxresdefault.jpg)](https://www.youtube.com/watch?v=AVuoqsDpeYQ)
+
+*Two minutes on video: add it in VS Code, flash, read the logs, send an update, decode a crash.*
+
 ## Add it to a project
 
 From your project's folder:
